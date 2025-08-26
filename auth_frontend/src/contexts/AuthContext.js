@@ -1,6 +1,36 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react'
+import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { api } from '../lib/api'
+
+/**
+ * Internal helper to read/write/remove access_token consistently
+ */
+const tokenStorage = {
+  get() {
+    try {
+      if (typeof window === 'undefined') return null
+      return window.localStorage.getItem('access_token')
+    } catch {
+      return null
+    }
+  },
+  set(token) {
+    try {
+      if (typeof window === 'undefined') return
+      if (token) window.localStorage.setItem('access_token', token)
+    } catch {
+      // ignore
+    }
+  },
+  remove() {
+    try {
+      if (typeof window === 'undefined') return
+      window.localStorage.removeItem('access_token')
+    } catch {
+      // ignore
+    }
+  },
+}
 
 // Auth state reducer
 const authReducer = (state, action) => {
@@ -24,7 +54,7 @@ const authReducer = (state, action) => {
         session: null,
         twoFactorRequired: false,
         loading: false,
-        error: null
+        error: null,
       }
     default:
       return state
@@ -39,7 +69,8 @@ const initialState = {
   twoFactorRequired: false,
 }
 
-const AuthContext = createContext()
+const AuthContext = createContext(null)
+AuthContext.displayName = 'AuthContext'
 
 // PUBLIC_INTERFACE
 export const AuthProvider = ({ children }) => {
@@ -50,86 +81,149 @@ export const AuthProvider = ({ children }) => {
    */
   const [state, dispatch] = useReducer(authReducer, initialState)
 
-  // Session timeout handling
+  // Helper: normalize and dispatch errors using api.normalizeError
+  const handleError = useCallback((err, fallback = 'Something went wrong') => {
+    const normalized = api.normalizeError(err, fallback)
+    dispatch({ type: 'SET_ERROR', payload: normalized.message })
+    return normalized
+  }, [])
+
+  // Define logout first so effects can reference it safely
+  // PUBLIC_INTERFACE
+  const logout = useCallback(async () => {
+    /**
+     * Log out the current user
+     */
+    try {
+      try {
+        await api.auth.logout()
+      } catch (_e) {
+        // ignore API logout failures
+      }
+      await supabase.auth.signOut()
+    } finally {
+      tokenStorage.remove()
+      dispatch({ type: 'LOGOUT' })
+    }
+  }, [])
+
+  // Reusable list of activity events
+  const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
+
+  // Session timeout handling (30 mins inactivity)
   useEffect(() => {
     let sessionTimer
 
     const startSessionTimer = () => {
-      clearTimeout(sessionTimer)
-      // 30 minutes session timeout
+      if (sessionTimer) clearTimeout(sessionTimer)
       sessionTimer = setTimeout(() => {
+        // best-effort async call; we don't await inside timer
         logout()
       }, 30 * 60 * 1000)
     }
 
     const resetSessionTimer = () => {
-      if (state.user && state.session) {
+      if (state.user && tokenStorage.get()) {
         startSessionTimer()
       }
     }
 
-    // Set up activity listeners
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
-    events.forEach(event => {
-      document.addEventListener(event, resetSessionTimer, true)
-    })
+    if (typeof document !== 'undefined') {
+      activityEvents.forEach(event => {
+        document.addEventListener(event, resetSessionTimer, true)
+      })
+    }
 
-    if (state.user && state.session) {
+    if (state.user && tokenStorage.get()) {
       startSessionTimer()
     }
 
     return () => {
-      clearTimeout(sessionTimer)
-      events.forEach(event => {
-        document.removeEventListener(event, resetSessionTimer, true)
-      })
+      if (sessionTimer) clearTimeout(sessionTimer)
+      if (typeof document !== 'undefined') {
+        activityEvents.forEach(event => {
+          document.removeEventListener(event, resetSessionTimer, true)
+        })
+      }
     }
-  }, [state.user, state.session])
+  }, [state.user, logout, dispatch, activityEvents])
 
-  // Initialize auth state
+  // Initialize auth state on mount
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        // If a token exists from previous session, keep it for initial API fetch
+        const existingToken = tokenStorage.get()
+
+        // Prefer Supabase session if available for consistency
         const { data: { session } } = await supabase.auth.getSession()
-        
+
         if (session?.access_token) {
-          localStorage.setItem('access_token', session.access_token)
+          tokenStorage.set(session.access_token)
           dispatch({ type: 'SET_SESSION', payload: session })
-          
-          // Get user profile from backend
+        } else if (existingToken) {
+          // If we only have a raw token, keep it; backend will validate
+          dispatch({ type: 'SET_SESSION', payload: { access_token: existingToken } })
+        }
+
+        // If we have any token, determine whether 2FA is completed and fetch profile accordingly
+        if (tokenStorage.get()) {
           try {
-            const userData = await api.user.getProfile()
-            dispatch({ type: 'SET_USER', payload: userData })
+            // Ask backend whether 2FA is complete
+            let requires2FA = false
+            try {
+              const status = await api.twoFactor.status()
+              // If backend returns success false or specific message, treat as requires 2FA
+              requires2FA = status?.success === false
+            } catch (_e) {
+              // On error, assume profile fetch will clarify; continue
+            }
+
+            if (!requires2FA) {
+              const userData = await api.user.getProfile()
+              dispatch({ type: 'SET_USER', payload: userData })
+              dispatch({ type: 'SET_2FA_REQUIRED', payload: false })
+            } else {
+              // Token exists but 2FA not completed yet
+              dispatch({ type: 'SET_2FA_REQUIRED', payload: true })
+              dispatch({ type: 'SET_LOADING', payload: false })
+            }
           } catch (error) {
-            console.error('Failed to fetch user profile:', error)
-            dispatch({ type: 'SET_ERROR', payload: 'Failed to fetch user profile' })
+            const normalized = api.normalizeError(error)
+            if (normalized.status === 401 || normalized.status === 403) {
+              tokenStorage.remove()
+              dispatch({ type: 'LOGOUT' })
+            } else {
+              dispatch({ type: 'SET_ERROR', payload: normalized.message })
+              dispatch({ type: 'SET_LOADING', payload: false })
+            }
           }
         } else {
+          // No token, not logged in
           dispatch({ type: 'SET_LOADING', payload: false })
         }
       } catch (error) {
-        console.error('Auth initialization error:', error)
-        dispatch({ type: 'SET_ERROR', payload: 'Authentication initialization failed' })
+        handleError(error, 'Authentication initialization failed')
       }
     }
 
     initializeAuth()
 
-    // Listen for auth changes
+    // Listen for Supabase auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'SIGNED_IN' && session) {
-          localStorage.setItem('access_token', session.access_token)
+          tokenStorage.set(session.access_token)
           dispatch({ type: 'SET_SESSION', payload: session })
         } else if (event === 'SIGNED_OUT') {
-          localStorage.removeItem('access_token')
+          tokenStorage.remove()
           dispatch({ type: 'LOGOUT' })
         }
       }
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [handleError])
 
   // PUBLIC_INTERFACE
   const signup = async (userData) => {
@@ -139,14 +233,14 @@ export const AuthProvider = ({ children }) => {
      */
     dispatch({ type: 'SET_LOADING', payload: true })
     dispatch({ type: 'CLEAR_ERROR' })
-    
+
     try {
       const result = await api.auth.signup(userData)
       dispatch({ type: 'SET_LOADING', payload: false })
       return result
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Failed to create account')
+      throw normalized
     }
   }
 
@@ -158,40 +252,27 @@ export const AuthProvider = ({ children }) => {
      */
     dispatch({ type: 'SET_LOADING', payload: true })
     dispatch({ type: 'CLEAR_ERROR' })
-    
+
     try {
+      // Backend returns an access_token intended for proceeding to 2FA
       const result = await api.auth.login(credentials)
-      
-      if (result.access_token) {
-        localStorage.setItem('access_token', result.access_token)
+
+      if (result?.access_token) {
+        tokenStorage.set(result.access_token)
+        // Gate access until 2FA completion
         dispatch({ type: 'SET_2FA_REQUIRED', payload: true })
+        // Do not set user yet; will be set after 2FA verify returns user
       }
-      
+
       dispatch({ type: 'SET_LOADING', payload: false })
       return result
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Login failed')
+      throw normalized
     }
   }
 
-  // PUBLIC_INTERFACE
-  const logout = async () => {
-    /**
-     * Log out the current user
-     */
-    try {
-      await api.auth.logout()
-      await supabase.auth.signOut()
-      localStorage.removeItem('access_token')
-      dispatch({ type: 'LOGOUT' })
-    } catch (error) {
-      console.error('Logout error:', error)
-      // Force logout even if API call fails
-      localStorage.removeItem('access_token')
-      dispatch({ type: 'LOGOUT' })
-    }
-  }
+  // (logout defined earlier)
 
   // PUBLIC_INTERFACE
   const sendTwoFactorOtp = async (email) => {
@@ -199,11 +280,12 @@ export const AuthProvider = ({ children }) => {
      * Send two-factor authentication OTP
      * @param {string} email - User email
      */
+    dispatch({ type: 'CLEAR_ERROR' })
     try {
       return await api.twoFactor.sendOtp(email)
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Failed to send verification code')
+      throw normalized
     }
   }
 
@@ -215,21 +297,35 @@ export const AuthProvider = ({ children }) => {
      * @param {string} otpCode - OTP code
      */
     dispatch({ type: 'SET_LOADING', payload: true })
-    
+    dispatch({ type: 'CLEAR_ERROR' })
+
     try {
       const result = await api.twoFactor.verifyOtp(email, otpCode)
-      
-      if (result.access_token) {
-        localStorage.setItem('access_token', result.access_token)
-        dispatch({ type: 'SET_USER', payload: result.user })
-        dispatch({ type: 'SET_2FA_REQUIRED', payload: false })
+
+      if (result?.access_token) {
+        tokenStorage.set(result.access_token)
       }
-      
+
+      if (result?.user) {
+        dispatch({ type: 'SET_USER', payload: result.user })
+      } else {
+        // If backend didn't return user, fetch profile as a fallback
+        try {
+          const userData = await api.user.getProfile()
+          dispatch({ type: 'SET_USER', payload: userData })
+        } catch (e) {
+          // Non-fatal; surface message but keep token
+          handleError(e, 'Failed to fetch user profile after verification')
+        }
+      }
+
+      dispatch({ type: 'SET_2FA_REQUIRED', payload: false })
       dispatch({ type: 'SET_LOADING', payload: false })
       return result
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Verification failed')
+      dispatch({ type: 'SET_LOADING', payload: false })
+      throw normalized
     }
   }
 
@@ -239,11 +335,12 @@ export const AuthProvider = ({ children }) => {
      * Request password reset
      * @param {string} email - User email
      */
+    dispatch({ type: 'CLEAR_ERROR' })
     try {
       return await api.auth.forgotPassword(email)
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Failed to send password reset instructions')
+      throw normalized
     }
   }
 
@@ -254,11 +351,12 @@ export const AuthProvider = ({ children }) => {
      * @param {string} token - Reset token
      * @param {string} newPassword - New password
      */
+    dispatch({ type: 'CLEAR_ERROR' })
     try {
       return await api.auth.resetPassword({ token, new_password: newPassword })
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error.message })
-      throw error
+      const normalized = handleError(error, 'Failed to reset password')
+      throw normalized
     }
   }
 
@@ -268,6 +366,21 @@ export const AuthProvider = ({ children }) => {
      * Clear the current error state
      */
     dispatch({ type: 'CLEAR_ERROR' })
+  }
+
+  // PUBLIC_INTERFACE
+  const refreshProfile = async () => {
+    /**
+     * Refresh the current user's profile from the backend
+     */
+    try {
+      const userData = await api.user.getProfile()
+      dispatch({ type: 'SET_USER', payload: userData })
+      return userData
+    } catch (error) {
+      const normalized = handleError(error, 'Failed to refresh profile')
+      throw normalized
+    }
   }
 
   const value = {
@@ -280,6 +393,7 @@ export const AuthProvider = ({ children }) => {
     forgotPassword,
     resetPassword,
     clearError,
+    refreshProfile,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
