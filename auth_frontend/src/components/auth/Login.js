@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect }
+
+Login.propTypes = {} from 'react'
 import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { validateEmail } from '../../lib/utils'
@@ -6,6 +8,7 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/Card'
 import { Alert, AlertDescription } from '../ui/Alert'
+import PropTypes from 'prop-types'
 
 // PUBLIC_INTERFACE
 export const Login = () => {
@@ -79,15 +82,16 @@ export const Login = () => {
         email: formData.email,
         password: formData.password,
       })
+      try { if (typeof window !== 'undefined') window.localStorage.setItem('user_email', formData.email) } catch {}
       
       // If login successful, redirect to 2FA
-      if (result.access_token) {
+      if (result?.access_token) {
         navigate('/verify-2fa', { 
           state: { email: formData.email }
         })
       }
-    } catch (err) {
-      console.error('Login error:', err)
+    } catch (_err) {
+      // error is normalized by context
     } finally {
       setIsSubmitting(false)
     }

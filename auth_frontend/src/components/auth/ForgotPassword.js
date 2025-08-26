@@ -1,4 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState }
+
+ForgotPassword.propTypes = {} from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { validateEmail } from '../../lib/utils'
@@ -33,11 +35,12 @@ export const ForgotPassword = () => {
   }
 
   const handleChange = (e) => {
-    setEmail(e.target.value)
+    const next = e.target.value
+    setEmail(next)
     
     // Clear field error when user starts typing
     if (errors.email) {
-      setErrors({})
+      setErrors(prev => ({ ...prev, email: '' }))
     }
     
     // Clear global error
@@ -57,9 +60,10 @@ export const ForgotPassword = () => {
     
     try {
       await forgotPassword(email)
+      try { if (typeof window !== 'undefined') window.localStorage.setItem('user_email', email) } catch {}
       setShowSuccess(true)
     } catch (err) {
-      console.error('Forgot password error:', err)
+      // error is normalized in context; no-op here
     } finally {
       setIsSubmitting(false)
     }
@@ -86,12 +90,23 @@ export const ForgotPassword = () => {
             <p className="text-sm text-secondary-600 mb-4">
               Didn't receive the email? Check your spam folder or try again.
             </p>
-            <Link 
-              to="/login" 
-              className="text-sm font-medium text-primary-600 hover:text-primary-500 transition-colors"
-            >
-              Back to login
-            </Link>
+            <p className="text-xs text-secondary-500 mb-2">
+              Tip: If you don&apos;t see the email in a few minutes, check your spam folder.
+            </p>
+            <div className="flex items-center justify-center gap-4">
+              <Link 
+                to="/login" 
+                className="text-sm font-medium text-primary-600 hover:text-primary-500 transition-colors"
+              >
+                Back to login
+              </Link>
+              <Link 
+                to="/forgot-password" 
+                className="text-sm font-medium text-secondary-600 hover:text-secondary-800 transition-colors"
+              >
+                Try again
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>

@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect }
+
+EmailVerification.propTypes = {} from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/Card'
@@ -30,19 +32,21 @@ export const EmailVerification = () => {
       try {
         const result = await api.auth.verifyEmail(token, email)
         setStatus('success')
-        setMessage(result.message || 'Email verified successfully!')
+        setMessage(result?.message || 'Email verified successfully!')
         
         // Redirect to login after 3 seconds
         setTimeout(() => {
           navigate('/login', {
             state: {
-              message: 'Email verified successfully! You can now log in to your account.'
+              message: 'Email verified successfully! You can now log in to your account.',
+              email: email || ((typeof window !== 'undefined' && window.localStorage.getItem('user_email')) || '')
             }
           })
         }, 3000)
-      } catch (error) {
+      } catch (err) {
+        const normalized = api.normalizeError(err, 'Failed to verify email. The link may be expired or invalid.')
         setStatus('error')
-        setMessage(error.message || 'Failed to verify email. The link may be expired or invalid.')
+        setMessage(normalized.message)
       }
     }
 

@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef }
+
+TwoFactorAuth.propTypes = {} from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { Button } from '../ui/Button'
@@ -16,12 +18,12 @@ export const TwoFactorAuth = () => {
   const [resendTimer, setResendTimer] = useState(0)
   const [showSuccess, setShowSuccess] = useState(false)
 
-  const inputRefs = useRef([])
+  const inputRefs = useRef(new Array(6).fill(null))
   const { verifyTwoFactorOtp, sendTwoFactorOtp, error, clearError } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const email = location.state?.email || localStorage.getItem('user_email')
+  const email = location.state?.email || (typeof window !== 'undefined' ? window.localStorage.getItem('user_email') : '')
 
   useEffect(() => {
     if (!email) {
@@ -33,8 +35,13 @@ export const TwoFactorAuth = () => {
     const sendInitialOtp = async () => {
       try {
         await sendTwoFactorOtp(email)
-      } catch (err) {
-        console.error('Failed to send initial OTP:', err)
+        setResendTimer(60)
+        // focus first box
+        setTimeout(() => {
+          inputRefs.current[0]?.focus()
+        }, 0)
+      } catch (_err) {
+        // normalized error shown via error alert
       }
     }
 
@@ -102,8 +109,7 @@ export const TwoFactorAuth = () => {
       setTimeout(() => {
         navigate('/dashboard')
       }, 1500)
-    } catch (err) {
-      console.error('2FA verification error:', err)
+    } catch (_err) {
       // Clear OTP on error
       setOtp(['', '', '', '', '', ''])
       inputRefs.current[0]?.focus()
@@ -124,8 +130,8 @@ export const TwoFactorAuth = () => {
       setResendTimer(60) // 60 second cooldown
       setOtp(['', '', '', '', '', ''])
       inputRefs.current[0]?.focus()
-    } catch (err) {
-      console.error('Resend OTP error:', err)
+    } catch (_err) {
+      // normalized error will show in alert
     } finally {
       setIsResending(false)
     }
@@ -175,7 +181,19 @@ export const TwoFactorAuth = () => {
               </Alert>
             )}
 
-            <div className="flex justify-center space-x-2">
+            <div
+              className="flex justify-center space-x-2"
+              onPaste={(e) => {
+                const text = (e.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 6)
+                if (text.length === 6) {
+                  e.preventDefault()
+                  const next = text.split('')
+                  setOtp(next)
+                  // auto-submit after paste
+                  handleSubmit(text)
+                }
+              }}
+            >
               {otp.map((digit, index) => (
                 <input
                   key={index}

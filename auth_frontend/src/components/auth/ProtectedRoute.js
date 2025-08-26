@@ -31,7 +31,7 @@ export const ProtectedRoute = ({ children }) => {
   // Not logged in => go to login and preserve intended route
   if (!user) {
     // Preserve intended destination when redirecting to login
-    const from = location?.pathname ? { from: location } : undefined
+    const from = location && location.pathname ? { from: { pathname: location.pathname, search: location.search, hash: location.hash } } : undefined
     return <Navigate to="/login" state={from} replace />
   }
 
@@ -52,10 +52,11 @@ export const ProtectedRoute = ({ children }) => {
 
   // If backend flagged 2FA requirement => go to 2FA flow
   if (twoFactorRequired) {
+    const emailHint = user?.email || localStorage.getItem('user_email')
     return (
       <Navigate
         to="/verify-2fa"
-        state={{ from: location, email: user?.email || localStorage.getItem('user_email') }}
+        state={{ from: location, email: emailHint }}
         replace
       />
     )

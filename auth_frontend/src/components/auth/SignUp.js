@@ -1,4 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState }
+
+SignUp.propTypes = {} from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { validateEmail, validatePassword } from '../../lib/utils'
@@ -116,8 +118,8 @@ export const SignUp = () => {
           }
         })
       }, 2000)
-    } catch (err) {
-      console.error('Signup error:', err)
+    } catch (_err) {
+      // error is normalized in context
     } finally {
       setIsSubmitting(false)
     }

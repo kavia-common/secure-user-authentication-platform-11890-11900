@@ -11,6 +11,7 @@ import { Button } from '../ui/Button'
  */
 export const EmailVerificationNotice = () => {
   const { user } = useAuth()
+  const emailHint = user?.email || ((typeof window !== 'undefined' && window.localStorage.getItem('user_email')) || 'your email')
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-secondary-50 px-4">
@@ -23,7 +24,7 @@ export const EmailVerificationNotice = () => {
           </div>
           <CardTitle>Verify Your Email</CardTitle>
           <CardDescription>
-            We sent a verification link to {user?.email || 'your email'}. Please check your inbox and click the link to continue.
+            We sent a verification link to {emailHint}. Please check your inbox and click the link to continue.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-center space-y-4">

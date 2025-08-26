@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect }
+
+ResetPassword.propTypes = {} from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { validatePassword } from '../../lib/utils'
@@ -25,6 +27,7 @@ export const ResetPassword = () => {
   const navigate = useNavigate()
 
   const token = searchParams.get('token')
+  const emailHint = (typeof window !== 'undefined' ? window.localStorage.getItem('user_email') : '') || ''
 
   useEffect(() => {
     if (!token) {
@@ -88,12 +91,13 @@ export const ResetPassword = () => {
       setTimeout(() => {
         navigate('/login', { 
           state: { 
-            message: 'Password reset successfully! Please log in with your new password.'
+            message: 'Password reset successfully! Please log in with your new password.',
+            email: emailHint
           }
         })
       }, 2000)
-    } catch (err) {
-      console.error('Reset password error:', err)
+    } catch (_err) {
+      // error is normalized in context
     } finally {
       setIsSubmitting(false)
     }
