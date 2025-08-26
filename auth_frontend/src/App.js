@@ -8,6 +8,7 @@ import { TwoFactorAuth } from './components/auth/TwoFactorAuth'
 import { ForgotPassword } from './components/auth/ForgotPassword'
 import { ResetPassword } from './components/auth/ResetPassword'
 import { EmailVerification } from './components/auth/EmailVerification'
+import { EmailVerificationNotice } from './components/auth/EmailVerificationNotice'
 import { Dashboard } from './components/dashboard/Dashboard'
 import './App.css'
 
@@ -27,6 +28,7 @@ function App() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-email" element={<EmailVerification />} />
+            <Route path="/verify-email/notice" element={<EmailVerificationNotice />} />
             <Route path="/verify-2fa" element={<TwoFactorAuth />} />
 
             {/* Protected routes */}
